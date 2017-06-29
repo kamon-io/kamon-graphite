@@ -20,36 +20,51 @@ import scala.concurrent.duration._
 
 object Graphite extends ExtensionId[GraphiteExtension] with ExtensionIdProvider {
   override def lookup(): ExtensionId[_ <: Extension] = Graphite
-  override def createExtension(system: ExtendedActorSystem): GraphiteExtension = new GraphiteExtension(system)
+  override def createExtension(system: ExtendedActorSystem): GraphiteExtension = new GraphiteExtension()(system)
 }
 
-class GraphiteExtension(system: ExtendedActorSystem) extends Kamon.Extension {
-  val log = LoggerFactory.getLogger(classOf[GraphiteExtension])
+class GraphiteExtension(implicit system: ExtendedActorSystem) extends Kamon.Extension {
+  private val log = LoggerFactory.getLogger(classOf[GraphiteExtension])
   log.info("Starting the Kamon(Graphite) extension")
 
-  implicit val as = system
   private val config = system.settings.config
   private val graphiteConfig = config.getConfig("kamon.graphite")
 
-  val tickInterval = Kamon.metrics.settings.tickInterval
-  val hostname = graphiteConfig.getString("hostname")
-  val port = graphiteConfig.getInt("port")
-  val metricPrefix = graphiteConfig.getString("metric-name-prefix")
-  val retryBufferSize = graphiteConfig.getInt("write-retry-buffer-size")
+  private val tickInterval = Kamon.metrics.settings.tickInterval
+  private val flushInterval = graphiteConfig.getFiniteDuration("flush-interval")
 
-  val metricsSender = system.actorOf(Props(new GraphiteClient(hostname, port, 10 seconds, 10 seconds, retryBufferSize, metricPrefix)), "kamon-graphite")
-  val graphiteClient = graphiteConfig match {
-    case NeedToScale(scaleTimeTo, scaleMemoryTo) ⇒
-      system.actorOf(MetricScaleDecorator.props(scaleTimeTo, scaleMemoryTo, metricsSender), "graphite-metric-scale-decorator")
-    case _ ⇒ metricsSender
-  }
+  private val hostname = graphiteConfig.getString("hostname")
+  private val port = graphiteConfig.getInt("port")
+  private val metricPrefix = graphiteConfig.getString("metric-name-prefix")
+  private val retryBufferSize = graphiteConfig.getInt("write-retry-buffer-size")
 
-  val subscriptions = graphiteConfig.getConfig("subscriptions")
-  subscriptions.firstLevelKeys.map { subscriptionCategory ⇒
+  private val graphiteClient = createGraphiteClient()
+
+  private val subscriptions = graphiteConfig.getConfig("subscriptions")
+  subscriptions.firstLevelKeys.foreach { subscriptionCategory ⇒
     subscriptions.getStringList(subscriptionCategory).asScala.foreach { pattern ⇒
       Kamon.metrics.subscribe(subscriptionCategory, pattern, graphiteClient, permanently = true)
     }
   }
+
+  private def createGraphiteClient(): ActorRef = {
+    if(flushInterval < tickInterval)
+      log.warn("Ignoring Graphite flush-interval. It needs to be equal or greater to the tick-interval")
+    val metricsSender = system.actorOf(Props(new GraphiteClient(hostname, port, 10 seconds, 10 seconds, retryBufferSize, metricPrefix)), "kamon-graphite")
+    val graphiteClient = graphiteConfig match {
+      case NeedToScale(scaleTimeTo, scaleMemoryTo) ⇒
+        system.actorOf(MetricScaleDecorator.props(scaleTimeTo, scaleMemoryTo, metricsSender), "graphite-metric-scale-decorator")
+      case _ ⇒ metricsSender
+    }
+
+    if (flushInterval <= tickInterval) {
+      // No need to buffer the metrics, let's go straight to the metrics sender.
+      graphiteClient
+    } else {
+      system.actorOf(TickMetricSnapshotBuffer.props(flushInterval, graphiteClient), "graphite-metrics-buffer")
+    }
+  }
+
 }
 
 trait MetricPacket {
