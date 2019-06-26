@@ -96,16 +96,27 @@ private abstract class GraphiteSender(val senderConfig: GraphiteSenderConfig) ex
 private class MetricPacketBuilder(baseName: String, timestamp: Long, config: GraphiteSenderConfig) {
   private val log = LoggerFactory.getLogger(classOf[MetricPacketBuilder])
   private val builder = new java.lang.StringBuilder()
-  private val tagseperator = if (config.legacySupport) "." else ";"
-  private val valueseperator = if (config.legacySupport) "." else "="
+  private val tagseperator = if (config.legacySupport) '.' else ';'
+  private val valueseperator = if (config.legacySupport) '.' else '='
+
+  val reservedChars = Set(' ', tagseperator, valueseperator)
 
   private def sanitize(value: String): String =
     value.replace('/', '_').replace('.', '_')
 
+  private def sanitizeTag(value: String): String =
+    value.map(c => if (reservedChars.contains(c)) '_' else c)
+
   def build(metricName: String, metricType: String, value: Long, metricTags: Tags): Array[Byte] = {
     builder.setLength(0)
     builder.append(baseName).append(".").append(sanitize(metricName)).append(".").append(metricType)
-    (metricTags ++ config.envTags).filterKeys(config.tagFilter.accept).foreach(kv => builder.append(tagseperator).append(kv._1).append(valueseperator).append(kv._2))
+    (metricTags ++ config.envTags)
+      .filterKeys(config.tagFilter.accept)
+      .foreach(kv => builder
+        .append(tagseperator)
+        .append(sanitizeTag(kv._1))
+        .append(valueseperator)
+        .append(sanitizeTag(kv._2)))
     builder
       .append(" ")
       .append(value)
