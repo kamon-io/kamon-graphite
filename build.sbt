@@ -16,8 +16,8 @@
 import scalariform.formatter.preferences._
 import com.typesafe.sbt.SbtScalariform.ScalariformKeys
 
-val kamonCore         = "io.kamon"               %% "kamon-core"          % "1.1.2"
-val kamonTestKit      = "io.kamon"               %% "kamon-testkit"       % "1.1.2"
+val kamonCore         = "io.kamon"               %% "kamon-core"          % "1.1.6"
+val kamonTestKit      = "io.kamon"               %% "kamon-testkit"       % "1.1.6"
 
 lazy val root = (project in file("."))
     .settings(name := "kamon-graphite")
