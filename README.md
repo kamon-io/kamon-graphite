@@ -4,7 +4,7 @@ Write report metrics in graphite format.
 Per default the graphite tag support (available since graphite 1.1) is enabled (see include-tags feature flag).
 
 ## Config
-    kamon{
+    kamon {
         graphite {
             # Hostname and port in which your Carbon daemon is running.
             hostname = "127.0.0.1"
